@@ -1,0 +1,137 @@
+# AlviStack - Ansible Collection for Kubernetes
+
+For running k8s conformance test we need 2 vagrant instances as master
+and 1 vagrant instance as node with following minimal system
+requirement, e.g.
+
+-   host
+    -   libvirt
+    -   nested virtualization enabled
+    -   Ubuntu 24.04
+    -   8 CPUs
+    -   32GB RAM
+-   `kube01`
+    -   kubernetes master, etcd
+    -   cri-o, flannel
+    -   Ubuntu 24.04
+    -   IP: 192.168.121.101/24
+    -   2 CPUs
+    -   8GB RAM
+-   `kube02`
+    -   kubernetes master, etcd
+    -   cri-o, flannel
+    -   Ubuntu 24.04
+    -   IP: 192.168.121.102/24
+    -   2 CPUs
+    -   8GB RAM
+-   `kube03`
+    -   kubernetes node, etcd
+    -   cri-o, flannel
+    -   Ubuntu 24.04
+    -   IP: 192.168.121.103/24
+    -   2 CPUs
+    -   8GB RAM
+
+## Bootstrap Host
+
+Install some basic pacakges for host:
+
+    apt update
+    apt full-upgrade
+    apt install -y aptitude git linux-generic-hwe-24.04 openssh-server python3 pwgen rsync vim
+
+Install Libvirt:
+
+    apt update
+    apt install -y binutils bridge-utils dnsmasq-base ebtables gcc libarchive-tools libguestfs-tools libvirt-clients libvirt-daemon-system libvirt-dev make qemu-system qemu-utils ruby-dev virt-manager
+
+Install Vagrant:
+
+    printf "Components:\nEnabled: yes\nX-Repolib-Name: alvistack\nSigned-By: /etc/apt/keyrings/home-alvistack.asc\nSuites: /\nTypes: deb\nURIs: http://downloadcontent.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04\n" | sudo tee /etc/apt/sources.list.d/home-alvistack.sources > /dev/null
+    curl -fsSL https://downloadcontent.opensuse.org/repositories/home:alvistack/xUbuntu_24.04/Release.key | sudo tee /etc/apt/keyrings/home-alvistack.asc > /dev/null
+    sudo -E apt-get update
+    sudo -E apt-get install -y vagrant
+    vagrant plugin install vagrant-libvirt
+
+## Bootstrap Ansible
+
+Install Ansible (see
+<https://software.opensuse.org/download/package?package=ansible&project=home%3Aalvistack>):
+
+    printf "Components:\nEnabled: yes\nX-Repolib-Name: alvistack\nSigned-By: /etc/apt/keyrings/home-alvistack.asc\nSuites: /\nTypes: deb\nURIs: http://downloadcontent.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04\n" | sudo tee /etc/apt/sources.list.d/home-alvistack.sources > /dev/null
+    curl -fsSL https://downloadcontent.opensuse.org/repositories/home:alvistack/xUbuntu_24.04/Release.key | sudo tee /etc/apt/keyrings/home-alvistack.asc > /dev/null
+    sudo -E apt-get update
+    sudo -E apt-get install -y ansible ansible-lint python3-docker python3-netaddr python3-vagrant
+
+Install Molecule:
+
+    printf "Components:\nEnabled: yes\nX-Repolib-Name: alvistack\nSigned-By: /etc/apt/keyrings/home-alvistack.asc\nSuites: /\nTypes: deb\nURIs: http://downloadcontent.opensuse.org/repositories/home:/alvistack/xUbuntu_24.04\n" | sudo tee /etc/apt/sources.list.d/home-alvistack.sources > /dev/null
+    curl -fsSL https://downloadcontent.opensuse.org/repositories/home:alvistack/xUbuntu_24.04/Release.key | sudo tee /etc/apt/keyrings/home-alvistack.asc > /dev/null
+    sudo -E apt-get update
+    sudo -E apt-get install -y python3-molecule python3-molecule-plugins
+
+GIT clone Ansible Collection for Kubernetes
+(<https://github.com/alvistack/ansible-collection-kubernetes>):
+
+    mkdir -p /opt/ansible-collection-kubernetes
+    cd /opt/ansible-collection-kubernetes
+    git init
+    git remote add upstream https://github.com/alvistack/ansible-collection-kubernetes.git
+    git fetch --all --prune
+    git checkout upstream/develop -- .
+    git submodule sync --recursive
+    git submodule update --init --recursive
+
+## Deploy Kubernetes
+
+Deploy kubernetes:
+
+    cd /opt/ansible-collection-kubernetes
+    export _MOLECULE_INSTANCE_NAME="$(pwgen -1AB 12)"
+    sudo -E molecule converge -s ubuntu-24.04-libvirt -- -e 'kube_release=1.32'
+    sudo -E molecule verify -s ubuntu-24.04-libvirt
+
+All instances could be SSH and switch as root with `sudo su -`, e.g.
+
+    cd /opt/ansible-collection-kubernetes
+    sudo -E molecule login -s ubuntu-24.04-libvirt -h $_MOLECULE_INSTANCE_NAME-1
+
+Check result:
+
+    root@kube01:~# kubectl get node
+    NAME     STATUS   ROLES           AGE    VERSION
+    kube01   Ready    control-plane   48m   v1.32.8
+    kube02   Ready    control-plane   48m   v1.32.8
+    kube03   Ready    <none>          47m   v1.32.8
+
+    root@kube01:~# kubectl get pod --all-namespaces
+    NAMESPACE     NAME                             READY   STATUS    RESTARTS   AGE
+    kube-system   cilium-bn6l7                     1/1     Running   1          48m
+    kube-system   cilium-n62pl                     1/1     Running   1          48m
+    kube-system   cilium-node-init-cwq9b           1/1     Running   1          48m
+    kube-system   cilium-node-init-cww5f           1/1     Running   1          48m
+    kube-system   cilium-node-init-qt8dx           1/1     Running   1          48m
+    kube-system   cilium-operator-f9554d685-sqbm7  1/1     Running   4          48m
+    kube-system   cilium-x7gr5                     1/1     Running   1          48m
+    kube-system   coredns-66bc5c9577-fcrhx         1/1     Running   0          41m
+    kube-system   coredns-66bc5c9577-zh8kv         1/1     Running   1          49m
+    kube-system   kube-apiserver-kube01            1/1     Running   1          49m
+    kube-system   kube-apiserver-kube02            1/1     Running   1          49m
+    kube-system   kube-controller-manager-kube01   1/1     Running   1          49m
+    kube-system   kube-controller-manager-kube02   1/1     Running   1          49m
+    kube-system   kube-proxy-9czjg                 1/1     Running   1          49m
+    kube-system   kube-proxy-dvcxr                 1/1     Running   1          48m
+    kube-system   kube-proxy-jp7tf                 1/1     Running   1          49m
+    kube-system   kube-scheduler-kube01            1/1     Running   1          49m
+    kube-system   kube-scheduler-kube02            1/1     Running   1          49m    
+
+## Run Sonobuoy
+
+Run sonobuoy for conformance test as official procedure
+(<https://github.com/cncf/k8s-conformance/blob/master/instructions.md>):
+
+    root@kube01:~# sonobuoy run --mode=certified-conformance --plugin-env=e2e.E2E_EXTRA_ARGS="--non-blocking-taints=node-role.kubernetes.io/controller --ginkgo.v"
+
+    root@kube01:~# sonobuoy status
+
+    root@kube01:~# sonobuoy retrieve
